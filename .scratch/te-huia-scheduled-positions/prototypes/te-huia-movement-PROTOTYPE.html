@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Te Huia Movement Model — PROTOTYPE</title>
+<style>
+  :root{
+    --bg:#fbfaf7; --panel:#fff; --ink:#1b1a17; --muted:#6b6862; --line:#e3e0d8;
+    --accent:#f2b705; --accent-ink:#4a3600; --at:#2b6cb0; --oos:#a83fa8;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font:15px/1.55 ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  .wrap{max-width:1100px;margin:0 auto;padding:32px 16px 80px}
+  h1{font-size:26px;margin:0 0 4px;letter-spacing:-.02em}
+  h2{font-size:15px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);
+     margin:36px 0 12px;font-weight:600}
+  .tag{display:inline-block;background:var(--accent);color:var(--accent-ink);
+       font-size:11px;font-weight:700;letter-spacing:.1em;padding:3px 8px;border-radius:3px;
+       text-transform:uppercase;vertical-align:middle;margin-left:8px}
+  .lede{color:var(--muted);max-width:70ch;margin:12px 0 0}
+  .lede strong{color:var(--ink)}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:18px 20px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px 22px}
+  .field .k{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)}
+  .field .v{font-size:19px;font-variant-numeric:tabular-nums;margin-top:2px}
+  .field .v small{font-size:12px;color:var(--muted);font-weight:400}
+  .phase{display:inline-block;padding:2px 10px;border-radius:99px;font-size:13px;font-weight:600}
+  .p-RUN{background:#e6f4ea;color:#1c6b33}
+  .p-DWELL{background:#e8effb;color:#1f4e8c}
+  .p-HELD{background:#fdecea;color:#a3271c}
+  .p-EARLY{background:#fff3d6;color:#7a5600}
+  .p-OFF{background:#eee;color:#666}
+  .p-ARRIVED{background:#e8effb;color:#1f4e8c}
+  .chain{display:flex;gap:2px;margin-top:14px;align-items:flex-end;overflow-x:auto;padding-bottom:26px;position:relative}
+  .cell{flex:1 0 12px;height:26px;background:#eceae4;border-radius:2px;position:relative}
+  .cell.stop{background:#dcd8cc}
+  .cell.te{background:var(--accent)}
+  .cell.at{background:var(--at)}
+  .cell.oos{background:var(--oos)}
+  .cell.both{background:linear-gradient(90deg,var(--accent) 50%,var(--at) 50%)}
+  .cell span{position:absolute;top:30px;left:50%;transform:translateX(-50%) rotate(35deg);
+             transform-origin:left top;font-size:10px;color:var(--muted);white-space:nowrap}
+  .legend{display:flex;gap:16px;font-size:12px;color:var(--muted);margin-top:34px;flex-wrap:wrap}
+  .sw{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:baseline}
+  button{font:inherit;background:#fff;border:1px solid var(--line);border-radius:6px;
+         padding:7px 12px;cursor:pointer;color:var(--ink)}
+  button:hover{border-color:#bdb8ab;background:#fdfcfa}
+  button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:600}
+  button:disabled{opacity:.4;cursor:default}
+  button.done{background:#f1efe9;color:var(--muted);text-decoration:line-through}
+  .row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;align-items:center}
+  .row .lbl{font-size:12px;color:var(--muted);min-width:96px}
+  .tabs{display:flex;gap:4px;flex-wrap:wrap;border-bottom:1px solid var(--line);margin-bottom:0}
+  .tab{padding:8px 13px;border:1px solid transparent;border-bottom:none;border-radius:6px 6px 0 0;
+       cursor:pointer;font-size:13px;color:var(--muted)}
+  .tab.on{background:#fff;border-color:var(--line);color:var(--ink);font-weight:600;margin-bottom:-1px}
+  .panel{background:#fff;border:1px solid var(--line);border-top:none;border-radius:0 0 8px 8px;padding:18px 20px}
+  .steps{display:flex;flex-direction:column;gap:6px;margin-top:14px;align-items:flex-start}
+  .note{font-size:13px;color:var(--muted);margin-top:10px}
+  .log{font:12px/1.5 ui-monospace,Menlo,monospace;color:var(--muted);background:#f6f4ef;
+       border-radius:6px;padding:10px 12px;margin-top:14px;max-height:120px;overflow:auto;white-space:pre-wrap}
+  select,input[type=number]{font:inherit;padding:5px 8px;border:1px solid var(--line);border-radius:6px;background:#fff}
+  .warn{border-left:3px solid var(--accent);padding-left:12px;margin:14px 0;color:var(--muted);font-size:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Te Huia movement model<span class="tag">Prototype</span></h1>
+<p class="lede">
+  Te Huia has no realtime feed, so its LED is computed from the timetable: <strong>where it should be
+  between two scheduled station times</strong>. Only three Auckland times exist — The Strand, Puhinui,
+  Pukekohe — spread over 50.8&nbsp;km and 62 track blocks. This page lets you drive that model by hand.
+</p>
+<p class="lede" style="margin-top:10px">
+  <strong>The question:</strong> does distance-proportional interpolation over legs that long look
+  plausible on the board, and does the rule that Te Huia yields to real trains behave sensibly — or
+  does it oscillate, deadlock, or teleport?
+</p>
+<div class="warn">
+  Two knobs below are <strong>undecided questions</strong>, not settled design. <em>Dwell</em> has no
+  published source (ticket 13) — the feed says zero. <em>Clear blocks</em> is ambiguous in the map
+  itself: the decision was labelled &ldquo;one clear block between them&rdquo; but described as
+  &ldquo;at most the block behind the occupied one&rdquo;. Try both and see which looks right.
+</div>
+
+<h2>Current state</h2>
+<div class="card">
+  <div class="grid" id="state"></div>
+  <div class="chain" id="chain"></div>
+  <div class="legend">
+    <span><i class="sw" style="background:var(--accent)"></i>Te Huia</span>
+    <span><i class="sw" style="background:var(--at)"></i>AT train (in service, has direction)</span>
+    <span><i class="sw" style="background:var(--oos)"></i>Out of service (no direction — ignored)</span>
+    <span><i class="sw" style="background:#dcd8cc"></i>Te Huia stop</span>
+  </div>
+  <div class="log" id="log"></div>
+</div>
+
+<h2>Free play</h2>
+<div class="card">
+  <div class="row"><span class="lbl">Clock</span>
+    <button data-act="t10">+10 sec</button>
+    <button data-act="t60">+1 min</button>
+    <button data-act="t300">+5 min</button>
+    <button data-act="t900">+15 min</button>
+  </div>
+  <div class="row"><span class="lbl">Service</span>
+    <button data-act="nb">Northbound run</button>
+    <button data-act="sb">Southbound run</button>
+    <button data-act="reset">Reset to start</button>
+  </div>
+  <div class="row"><span class="lbl">Real trains</span>
+    <button data-act="ahead">AT train 3 blocks ahead</button>
+    <button data-act="behind">AT train 3 blocks behind</button>
+    <button data-act="oos">Stabled unit at Wiri Depot</button>
+    <button data-act="opp">Opposite-direction train alongside</button>
+  </div>
+  <div class="row"><span class="lbl"></span>
+    <button data-act="advance">Move each AT train on 1 block</button>
+    <button data-act="clear">Remove all real trains</button>
+  </div>
+  <div class="row"><span class="lbl">Parameters</span>
+    <label>Dwell <input type="number" id="dwell" value="60" min="0" max="600" step="10" style="width:75px"> sec</label>
+    <label>applied
+      <select id="dwellMode">
+        <option value="after">after the scheduled time</option>
+        <option value="before">before it</option>
+        <option value="straddle">straddling it</option>
+      </select></label>
+    <label>Clear blocks
+      <select id="clearBlocks"><option>0</option><option selected>1</option><option>2</option></select></label>
+    <label>Max <input type="number" id="maxKmh" value="100" min="10" max="200" step="5" style="width:70px"> km/h</label>
+  </div>
+</div>
+
+<h2>Guided walkthroughs</h2>
+<div class="tabs" id="tabs"></div>
+<div class="panel" id="panel"></div>
+
+</div>
+<script>
+// ─────────────────────────────────────────────────────────────────────────────
+//  PURE MODEL — no DOM in here. This is the part worth lifting into the codebase.
+// ─────────────────────────────────────────────────────────────────────────────
+const CHAIN = [{"b": 300, "l": "300 - The Strand", "km": 0.0}, {"b": 322, "l": "322", "km": 0.4746}, {"b": 324, "l": "324", "km": 1.1086}, {"b": 325, "l": "325", "km": 1.8637}, {"b": 326, "l": "326", "km": 2.6924}, {"b": 327, "l": "327 - \u014cr\u0101kei", "km": 3.1292}, {"b": 328, "l": "328", "km": 3.6897}, {"b": 329, "l": "329 - Meadowbank", "km": 4.2455}, {"b": 330, "l": "330", "km": 5.2416}, {"b": 331, "l": "331", "km": 6.5289}, {"b": 332, "l": "332", "km": 7.2675}, {"b": 333, "l": "333 - Glen Innes", "km": 7.777}, {"b": 334, "l": "334", "km": 8.2999}, {"b": 335, "l": "335", "km": 9.4738}, {"b": 336, "l": "336 - Panmure", "km": 9.9977}, {"b": 337, "l": "337", "km": 10.773}, {"b": 338, "l": "338", "km": 11.5339}, {"b": 339, "l": "339 - Sylvia Park", "km": 11.9739}, {"b": 340, "l": "340", "km": 12.5984}, {"b": 341, "l": "341", "km": 13.7318}, {"b": 159, "l": "159", "km": 14.4591}, {"b": 160, "l": "160", "km": 15.3637}, {"b": 162, "l": "162 - Otahuhu (+161)", "km": 15.9934}, {"b": 163, "l": "163", "km": 16.6909}, {"b": 164, "l": "164", "km": 17.4143}, {"b": 165, "l": "165 - Middlemore", "km": 17.7936}, {"b": 166, "l": "166", "km": 18.7429}, {"b": 167, "l": "167 - Papatoetoe", "km": 19.6624}, {"b": 168, "l": "168", "km": 20.4248}, {"b": 170, "l": "170 - Puhinui (+169)", "km": 21.1716}, {"b": 171, "l": "171", "km": 21.6628}, {"b": 172, "l": "172 - Wiri Depot Platform", "km": 22.3916}, {"b": 174, "l": "174", "km": 23.4653}, {"b": 176, "l": "176 - Homai", "km": 24.3224}, {"b": 177, "l": "177", "km": 25.1245}, {"b": 178, "l": "178", "km": 25.9526}, {"b": 179, "l": "179 - Manurewa", "km": 26.5236}, {"b": 180, "l": "180", "km": 27.2268}, {"b": 181, "l": "181 - Te Mahia", "km": 27.7593}, {"b": 182, "l": "182", "km": 28.5313}, {"b": 183, "l": "183 - Takaanini", "km": 29.316}, {"b": 184, "l": "184", "km": 29.8931}, {"b": 185, "l": "185", "km": 30.9679}, {"b": 186, "l": "186", "km": 32.0309}, {"b": 188, "l": "188 - Papakura (+189)", "km": 32.9807}, {"b": 190, "l": "190", "km": 34.0776}, {"b": 191, "l": "191", "km": 34.9131}, {"b": 192, "l": "192", "km": 35.925}, {"b": 193, "l": "193", "km": 37.1602}, {"b": 194, "l": "194 - Drury", "km": 37.7312}, {"b": 195, "l": "195", "km": 38.8981}, {"b": 196, "l": "196 - Ng\u0101k\u014droa", "km": 40.1854}, {"b": 197, "l": "197", "km": 40.5894}, {"b": 198, "l": "198", "km": 41.3084}, {"b": 199, "l": "199", "km": 42.6849}, {"b": 200, "l": "200", "km": 44.3618}, {"b": 201, "l": "201 - Paer\u0101t\u0101", "km": 45.2096}, {"b": 202, "l": "202", "km": 46.1063}, {"b": 203, "l": "203", "km": 47.383}, {"b": 204, "l": "204", "km": 48.0313}, {"b": 205, "l": "205", "km": 49.6316}, {"b": 207, "l": "207 - Pukekohe (+206)", "km": 50.8265}];
+const TOTAL_KM = CHAIN[CHAIN.length - 1].km;
+const STOP_IDX = { strand: 0, puhinui: 29, pukekohe: 61 };
+
+const TRIPS = {
+  NB: { id: '255-800005-21900-1-199-3e0f9879', dir: 'NB',
+        label: 'Northbound — 07:27 Pukekohe → 08:35 The Strand',
+        times: [[STOP_IDX.pukekohe, '07:27'], [STOP_IDX.puhinui, '08:01'], [STOP_IDX.strand, '08:35']] },
+  SB: { id: '255-800006-34800-1-499-426a2e04', dir: 'SB',
+        label: 'Southbound — 09:40 The Strand → 10:47 Pukekohe',
+        times: [[STOP_IDX.strand, '09:40'], [STOP_IDX.puhinui, '10:10'], [STOP_IDX.pukekohe, '10:47']] }
+};
+
+const hhmm = s => `${String(Math.floor(s/3600)).padStart(2,'0')}:${String(Math.floor(s%3600/60)).padStart(2,'0')}:${String(Math.floor(s%60)).padStart(2,'0')}`;
+const toSec = t => { const [h,m] = t.split(':').map(Number); return h*3600 + m*60; };
+
+// Travel-direction-agnostic coordinates: "progress" runs 0 → TOTAL_KM in the direction of travel,
+// and "ordinal" is the same thing in block counts. All conflict maths happens in this space.
+const kmToProgress  = (dir, km) => dir === 'NB' ? TOTAL_KM - km : km;
+const progressToKm  = (dir, p)  => dir === 'NB' ? TOTAL_KM - p  : p;
+const idxToOrdinal  = (dir, i)  => dir === 'NB' ? (CHAIN.length - 1 - i) : i;
+const ordinalToKm   = (dir, o)  => {
+  const i = dir === 'NB' ? (CHAIN.length - 1 - o) : o;
+  const lo = Math.max(0, Math.min(CHAIN.length - 1, Math.floor(i)));
+  const hi = Math.max(0, Math.min(CHAIN.length - 1, Math.ceil(i)));
+  return CHAIN[lo].km + (CHAIN[hi].km - CHAIN[lo].km) * (i - lo);
+};
+
+// Blocks are centroids on a polyline, so the occupied block is simply the nearest centroid.
+function blockAt(km) {
+  let best = 0, bd = Infinity;
+  CHAIN.forEach((c, i) => { const d = Math.abs(c.km - km); if (d < bd) { bd = d; best = i; } });
+  return best;
+}
+
+// The timetable gives ONE time per stop (the feed encodes zero dwell), so dwell is synthesised
+// around it. Which side it falls on is ticket 13's open question — hence dwellMode.
+function buildTrip(trip, dwellSec, dwellMode) {
+  return trip.times.map(([idx, t], n) => {
+    const base = toSec(t), km = CHAIN[idx].km;
+    const first = n === 0, last = n === trip.times.length - 1;
+    let arr = base, dep = base;
+    if (!first && !last) {
+      if (dwellMode === 'after')    { arr = base;            dep = base + dwellSec; }
+      if (dwellMode === 'before')   { arr = base - dwellSec; dep = base; }
+      if (dwellMode === 'straddle') { arr = base - dwellSec/2; dep = base + dwellSec/2; }
+    }
+    return { idx, km, arr, dep, name: CHAIN[idx].l };
+  });
+}
+
+// Where the timetable says it is. Distance-proportional between the bounding scheduled times.
+function scheduledKm(stops, t) {
+  if (t <= stops[0].dep) return stops[0].km;
+  const last = stops[stops.length - 1];
+  if (t >= last.arr) return last.km;
+  for (let i = 0; i < stops.length - 1; i++) {
+    const a = stops[i], b = stops[i + 1];
+    if (t >= a.arr && t <= a.dep) return a.km;            // dwelling
+    if (t > a.dep && t < b.arr) {
+      const f = (t - a.dep) / (b.arr - a.dep);
+      return a.km + (b.km - a.km) * f;
+    }
+  }
+  return last.km;
+}
+
+// Dwelling is a fact about the TRAIN, not about the clock: it must be inside the window AND in the
+// station's own block. Testing time alone teleported a held train onto the platform, straight
+// through whatever was blocking it (found by this prototype, 2026-09-17).
+const isDwelling = (stops, t, km) => km !== null && stops.some((s, i) =>
+  i > 0 && i < stops.length - 1 && t >= s.arr && t <= s.dep && blockAt(km) === s.idx);
+
+// Visibility STARTS on the clock (map note 11) but ENDS on arrival, not on the clock — otherwise a
+// delayed Te Huia blinks out mid-chain instead of finishing its run.
+function hasStarted(trip, stops, t) {
+  const strand = stops.find(s => s.idx === STOP_IDX.strand);
+  const puke   = stops.find(s => s.idx === STOP_IDX.pukekohe);
+  return trip.dir === 'NB' ? t >= puke.arr : t >= strand.dep - 60;
+}
+const END_GRACE = { NB: 60, SB: 0 };   // NB terminates at The Strand: stays lit 1 min after arriving
+const atChainEnd = (dir, km) => dir === 'NB' ? km <= 0.02 : km >= TOTAL_KM - 0.02;
+
+// Conflict limits, in progress-km. Only in-service, same-direction trains count (ticket 04).
+function conflictLimits(trains, dir, pTe, clearBlocks) {
+  let hi = Infinity, lo = -Infinity, blocker = null, pusher = null;
+  const oTe = kmToOrdinalApprox(dir, pTe);
+  for (const tr of trains) {
+    if (!tr.inService || tr.dir !== dir) continue;          // out of service → ignored entirely
+    const oTr = idxToOrdinal(dir, tr.idx);
+    if (oTr > oTe) {                                        // ahead of Te Huia
+      const cap = kmToProgress(dir, ordinalToKm(dir, oTr - (clearBlocks + 1)));
+      if (cap < hi) { hi = cap; blocker = tr; }
+    } else if (oTr < oTe) {                                 // closing from behind
+      const floor = kmToProgress(dir, ordinalToKm(dir, oTr + (clearBlocks + 1)));
+      if (floor > lo) { lo = floor; pusher = tr; }
+    }
+  }
+  return { hi, lo, blocker, pusher };
+}
+function kmToOrdinalApprox(dir, p) {
+  const km = progressToKm(dir, p);
+  let i = 0;
+  while (i < CHAIN.length - 1 && CHAIN[i + 1].km < km) i++;
+  const span = CHAIN[i + 1] ? CHAIN[i + 1].km - CHAIN[i].km : 1;
+  const frac = span ? (km - CHAIN[i].km) / span : 0;
+  return idxToOrdinal(dir, i + (dir === 'NB' ? -frac : frac));
+}
+
+// One tick. Pure: (state, context) → state.
+function step(state, ctx) {
+  const { t, dt, trip, stops, trains, params } = ctx;
+  if (!hasStarted(trip, stops, t)) return { ...state, km: null, phase: 'OFF', blocker: null };
+  if (state.finishedAt != null) {
+    return t > state.finishedAt + END_GRACE[trip.dir]
+      ? { ...state, km: null, phase: 'OFF', blocker: null }
+      : { ...state, phase: 'ARRIVED', blocker: null };
+  }
+
+  const sched = scheduledKm(stops, t);
+  if (state.km === null) return { ...state, km: sched, phase: 'RUN', blocker: null };  // appears on schedule
+
+  if (isDwelling(stops, t, state.km)) return { ...state, km: state.km, phase: 'DWELL', blocker: null }; // rules suspended
+
+  const dir = trip.dir;
+  const pNow = kmToProgress(dir, state.km);
+  let pWant = kmToProgress(dir, sched);
+
+  const { hi, lo, blocker, pusher } = conflictLimits(trains, dir, pNow, params.clearBlocks);
+  let phase = 'RUN', who = null;
+  if (pWant > hi) { pWant = hi; phase = 'HELD';  who = blocker; }
+  if (pWant < lo) { pWant = lo; phase = 'EARLY'; who = pusher;  }
+
+  const maxStep = params.maxKmh / 3600 * dt;                // speed cap (ticket 04 / 16)
+  let dp = pWant - pNow;
+  const capped = Math.abs(dp) > maxStep;
+  if (capped) dp = Math.sign(dp) * maxStep;
+  if (phase === 'RUN' && capped) phase = 'RUN';             // catching up, cap binding
+
+  const km = progressToKm(dir, pNow + dp);
+  const finishedAt = atChainEnd(dir, km) ? t : null;
+  return { ...state, km, phase: finishedAt ? 'ARRIVED' : phase, blocker: who, capped, finishedAt };
+}
+
+// How far behind (or ahead of) schedule, in seconds — by inverting scheduledKm.
+function driftSeconds(stops, t, km) {
+  let lo = stops[0].dep, hi = stops[stops.length - 1].arr;
+  const dir = CHAIN[stops[0].idx].km < CHAIN[stops[stops.length-1].idx].km ? 1 : -1;
+  for (let n = 0; n < 40; n++) {
+    const mid = (lo + hi) / 2, k = scheduledKm(stops, mid);
+    if ((k - km) * dir < 0) lo = mid; else hi = mid;
+  }
+  return t - (lo + hi) / 2;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  PAGE SHELL — throwaway.
+// ─────────────────────────────────────────────────────────────────────────────
+let S = null, LOG = [];
+const params = () => ({
+  dwell: +document.getElementById('dwell').value,
+  dwellMode: document.getElementById('dwellMode').value,
+  clearBlocks: +document.getElementById('clearBlocks').value,
+  maxKmh: +document.getElementById('maxKmh').value
+});
+
+function reset(dirKey) {
+  const p = params();
+  const trip = TRIPS[dirKey || (S ? S.dirKey : 'SB')];
+  const stops = buildTrip(trip, p.dwell, p.dwellMode);
+  S = { dirKey: dirKey || (S ? S.dirKey : 'SB'), trip, stops,
+        t: stops[0].dep - 180,
+        km: null, phase: 'OFF', trains: [], blocker: null, capped: false, finishedAt: null };
+  LOG = [`reset — ${trip.label}`];
+  render();
+}
+function rebuildStops() { const p = params(); S.stops = buildTrip(S.trip, p.dwell, p.dwellMode); render(); }
+
+function advanceTime(sec) {
+  const dt = 20;                       // the real network's update interval
+  for (let i = 0; i < sec / dt; i++) {
+    S.t += dt;
+    const before = S.phase;
+    S = { ...S, ...step(S, { t: S.t, dt, trip: S.trip, stops: S.stops, trains: S.trains, params: params() }) };
+    if (S.phase !== before) LOG.unshift(`${hhmm(S.t)}  ${before} → ${S.phase}${S.blocker ? ' (' + S.blocker.id + ')' : ''}`);
+  }
+  render();
+}
+const teIdx = () => S.km === null ? null : blockAt(S.km);
+function addTrain(offsetBlocks, opts) {
+  const base = teIdx() !== null ? teIdx() : (S.trip.dir === 'NB' ? CHAIN.length - 1 : 0);
+  const o = idxToOrdinal(S.trip.dir, base) + offsetBlocks;
+  const i = S.trip.dir === 'NB' ? CHAIN.length - 1 - o : o;
+  const idx = Math.max(0, Math.min(CHAIN.length - 1, Math.round(i)));
+  S.trains.push({ id: opts.id, idx, dir: opts.dir ?? S.trip.dir, inService: opts.inService !== false });
+  LOG.unshift(`${hhmm(S.t)}  placed ${opts.id} in block ${CHAIN[idx].b}`);
+  render();
+}
+
+const ACTIONS = {
+  t10: () => advanceTime(10), t60: () => advanceTime(60), t300: () => advanceTime(300), t900: () => advanceTime(900),
+  nb: () => reset('NB'), sb: () => reset('SB'), reset: () => reset(),
+  ahead:  () => addTrain(3,  { id: 'AMP-59334' }),
+  behind: () => addTrain(-3, { id: 'AMP-59201' }),
+  oos:    () => { S.trains.push({ id: 'AMP-59018 (stabled)', idx: 31, dir: null, inService: false });
+                  LOG.unshift(`${hhmm(S.t)}  stabled unit placed in block 172 — Wiri Depot Platform`); render(); },
+  opp:    () => addTrain(1, { id: 'AMP-59674 (opposite)', dir: S.trip.dir === 'NB' ? 'SB' : 'NB' }),
+  advance:() => { S.trains.forEach(tr => { if (!tr.inService) return;
+                    tr.idx += (tr.dir === 'NB' ? -1 : 1);
+                    tr.idx = Math.max(0, Math.min(CHAIN.length - 1, tr.idx)); }); render(); },
+  clear:  () => { S.trains = []; LOG.unshift(`${hhmm(S.t)}  all real trains removed`); render(); }
+};
+document.querySelectorAll('[data-act]').forEach(b => b.onclick = () => { ACTIONS[b.dataset.act](); });
+['dwell','dwellMode'].forEach(id => document.getElementById(id).onchange = rebuildStops);
+['clearBlocks','maxKmh'].forEach(id => document.getElementById(id).onchange = render);
+
+function render() {
+  const idx = teIdx();
+  const drift = S.km === null ? null : driftSeconds(S.stops, S.t, S.km);
+  const sched = scheduledKm(S.stops, S.t);
+  const f = (k, v) => `<div class="field"><div class="k">${k}</div><div class="v">${v}</div></div>`;
+  document.getElementById('state').innerHTML =
+    f('Simulated time', hhmm(S.t)) +
+    f('Service', `<small>${S.trip.label}</small>`) +
+    f('Status', `<span class="phase p-${S.phase}">${
+       {RUN:'Running',DWELL:'Dwelling at station',HELD:'Held behind a train',EARLY:'Pushed early',ARRIVED:'Arrived — leaving the board',OFF:'Not on the board'}[S.phase]}</span>`) +
+    f('Lit block', idx === null ? '—' : `${CHAIN[idx].b} <small>${CHAIN[idx].l.replace(/^\d+ - /,'')}</small>`) +
+    f('Position', S.km === null ? '—' : `${S.km.toFixed(2)} <small>km from The Strand</small>`) +
+    f('Timetable says', `${sched.toFixed(2)} <small>km</small>`) +
+    f('Off schedule', drift === null ? '—' : `${drift > 0 ? '+' : ''}${Math.round(drift)} <small>sec ${drift > 0 ? 'late' : 'early'}</small>`) +
+    f('Speed cap', S.capped ? 'binding' : 'slack');
+
+  document.getElementById('chain').innerHTML = CHAIN.map((c, i) => {
+    const isTe = idx === i;
+    const tr = S.trains.find(t => t.idx === i);
+    let cls = 'cell';
+    if (Object.values(STOP_IDX).includes(i)) cls += ' stop';
+    if (isTe && tr) cls += ' both'; else if (isTe) cls += ' te';
+    else if (tr) cls += tr.inService ? ' at' : ' oos';
+    const lbl = Object.values(STOP_IDX).includes(i) ? `<span>${c.l.replace(/^\d+ - /,'').replace(/ \(.*\)/,'')}</span>` : '';
+    return `<div class="${cls}" title="block ${c.b} — ${c.l}">${lbl}</div>`;
+  }).join('');
+  document.getElementById('log').textContent = LOG.slice(0, 8).join('\n');
+  renderScenario();
+}
+
+// ── Guided walkthroughs ──────────────────────────────────────────────────────
+const SCENARIOS = [
+  { name: 'A clean run', why: 'No real trains anywhere. Watch Te Huia appear at its scheduled Strand departure, cross 62 blocks, and vanish at Pukekohe. The long Puhinui–Pukekohe leg is where distance-proportional interpolation is most exposed — decide whether that steady crawl looks like a train.',
+    steps: [['Start southbound run', () => reset('SB')], ['+1 min — it appears', () => advanceTime(60)],
+            ['+5 min', () => advanceTime(300)], ['+15 min — approaching Puhinui', () => advanceTime(900)],
+            ['+5 min — dwelling', () => advanceTime(300)], ['+15 min', () => advanceTime(900)],
+            ['+15 min — near Pukekohe', () => advanceTime(900)]] },
+  { name: 'Held behind a stopped train', why: 'A real southbound AT train sits 3 blocks ahead and never moves. Te Huia should stop short of it rather than pass through, and fall progressively behind schedule. Watch "Off schedule" grow — the decision was that there is no limit to this.',
+    steps: [['Start southbound run', () => reset('SB')], ['+2 min — under way', () => advanceTime(120)],
+            ['Put an AT train 3 blocks ahead', () => ACTIONS.ahead()], ['+1 min', () => advanceTime(60)],
+            ['+2 min — should be held', () => advanceTime(120)], ['+5 min — drift grows', () => advanceTime(300)],
+            ['Move the AT train on 1 block', () => ACTIONS.advance()], ['+1 min — catching up', () => advanceTime(60)],
+            ['Remove it entirely', () => ACTIONS.clear()], ['+2 min — full catch-up, speed-capped', () => advanceTime(120)]] },
+  { name: 'Caught from behind', why: 'A real train closes from behind. Te Huia cannot slow a real train down, so instead it is pushed ahead of schedule to stay a block in front. Watch "Off schedule" go negative — Te Huia is now running early, which is the price of never showing an impossible pass.',
+    steps: [['Start southbound run', () => reset('SB')], ['+3 min', () => advanceTime(180)],
+            ['Put an AT train 3 blocks behind', () => ACTIONS.behind()],
+            ['Move it up 1 block', () => ACTIONS.advance()], ['Move it up again', () => ACTIONS.advance()],
+            ['+1 min — should be pushed early', () => advanceTime(60)], ['Move it up again', () => ACTIONS.advance()],
+            ['+1 min', () => advanceTime(60)]] },
+  { name: 'Passed while dwelling', why: 'Conflict rules are suspended while Te Huia stands at a station — it is platformed, so AT traffic flows past. Advance to the Puhinui dwell, then run an AT train straight through it. Nothing should be held.',
+    steps: [['Start southbound run', () => reset('SB')], ['+25 min — reach Puhinui', () => advanceTime(1500)],
+            ['+5 min — settle into the dwell', () => advanceTime(300)], ['Put an AT train 1 block behind', () => ACTIONS.behind()],
+            ['Run it through', () => ACTIONS.advance()], ['And again', () => ACTIONS.advance()],
+            ['+10 sec — still dwelling, unaffected', () => advanceTime(10)]] },
+  { name: 'The stabled unit', why: 'Block 172 is Wiri Depot Platform — a depot block that sits on the running line, so it is on Te Huia\'s chain. A unit stabled there has no trip, no route and no direction. The decision was to ignore such trains entirely; without that rule this one unit would hold Te Huia back every single day.',
+    steps: [['Start southbound run', () => reset('SB')], ['Stable a unit at Wiri Depot', () => ACTIONS.oos()],
+            ['+20 min', () => advanceTime(1200)], ['+10 min — passing Wiri', () => advanceTime(600)],
+            ['+2 min — straight past it', () => advanceTime(120)]] },
+  { name: 'Held past its own station', why: 'The case that broke the first draft of this model. Te Huia is held behind a stopped train, and the clock reaches its scheduled Puhinui dwell while it is still far short of Puhinui. The original rules answered "is it dwelling?" and "is it still visible?" from the timetable alone, so it teleported 22 km onto the platform — straight through the train blocking it — and a delayed run vanished mid-chain. Both tests are now about where the train actually is: it stays held here, dwells only when it truly reaches the station, and stays on the board until it reaches the end of the chain however late that is.',
+    steps: [['Start southbound run', () => reset('SB')], ['+2 min', () => advanceTime(120)],
+            ['Put an AT train 3 blocks ahead', () => ACTIONS.ahead()], ['+10 min — held short of Puhinui', () => advanceTime(600)],
+            ['+10 min — drift keeps growing', () => advanceTime(600)],
+            ['+10 min — now watch the lit block', () => advanceTime(600)],
+            ['+5 min — it jumped the queue', () => advanceTime(300)]] },
+  { name: 'Opposite direction', why: 'One polygon spans both tracks, so a northbound train shares a block number with the southbound line. It must not trigger a hold. This is the case direction_id exists to solve.',
+    steps: [['Start southbound run', () => reset('SB')], ['+3 min', () => advanceTime(180)],
+            ['Put an opposite-direction train right ahead', () => ACTIONS.opp()],
+            ['+1 min — should be unaffected', () => advanceTime(60)], ['+2 min', () => advanceTime(120)]] }
+];
+let curScenario = 0, stepPtr = 0;
+document.getElementById('tabs').innerHTML = SCENARIOS.map((s, i) =>
+  `<div class="tab ${i === 0 ? 'on' : ''}" data-i="${i}">${s.name}</div>`).join('');
+document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
+  curScenario = +t.dataset.i; stepPtr = 0;
+  document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x === t));
+  renderScenario();
+});
+function renderScenario() {
+  const s = SCENARIOS[curScenario];
+  document.getElementById('panel').innerHTML =
+    `<div class="note" style="color:var(--ink);font-size:14px;max-width:72ch">${s.why}</div>
+     <div class="steps">${s.steps.map((st, i) =>
+       `<button data-step="${i}" class="${i < stepPtr ? 'done' : ''} ${i === stepPtr ? 'primary' : ''}"
+         ${i > stepPtr ? 'disabled' : ''}>${i + 1}. ${st[0]}</button>`).join('')}</div>
+     ${stepPtr >= s.steps.length ? '<div class="note">Walkthrough complete — free-play buttons above still work.</div>' : ''}`;
+  document.querySelectorAll('[data-step]').forEach(b => b.onclick = () => {
+    const i = +b.dataset.step; SCENARIOS[curScenario].steps[i][1](); if (i === stepPtr) stepPtr++; renderScenario();
+  });
+}
+reset('SB');
+</script>
+</body>
+</html>
