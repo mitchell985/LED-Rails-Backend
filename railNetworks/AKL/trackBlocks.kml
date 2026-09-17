@@ -1501,7 +1501,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>300 - The Strand [OUT-OF-SERVICE]</name>
+			<name>300 - The Strand [OUT-OF-SERVICE,HUIA-404]</name>
 			<styleUrl>#m_ylw-pushpin0</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>

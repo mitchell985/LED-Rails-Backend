@@ -12,6 +12,7 @@ import {
     updateTrackedTrains,
     TrainInfo,
     generateLedMap,
+    applyAltBlocks,
 } from './trackBlocks';
 
 import loadStopsMap from './platforms';
@@ -21,6 +22,12 @@ import { saveToCache, readFromCache } from './cache';
 import { TrainPair, checkForTrainPairs } from './trainPairs';
 import { log } from './customUtils';
 import { downloadStaticGTFS, generateTimetable } from './staticGTFS';
+import {
+    ScheduledTrain,
+    ScheduledTrainConfig,
+    distilTimetable,
+    loadScheduledTrains,
+} from './scheduledTrains';
 
 /**
  * Configuration for a rail network, loaded from config.json
@@ -41,6 +48,7 @@ interface RailNetworkConfig {
         key?: string; // API key (loaded from .env, not config.json)
         fetchIntervalDays: number; // How often to fetch updates
     };
+    scheduledTrains?: Array<ScheduledTrainConfig>; // Services placed from static timetable data alone (no realtime feed)
     trainFilter: {
         entityID?: {
             start: number; // Start of numeric ID range
@@ -92,6 +100,9 @@ export class RailNetwork {
 
     entities: Entity[] = [];
     ledRailsAPIs: LEDRailsAPI[] = [];
+
+    scheduledTrains: ScheduledTrain[] = [];         // services placed from a static timetable
+    scheduledTrainInfos: TrainInfo[] = [];          // their synthetic vehicles, this tick
 
     trainPairs: TrainPair[] = [];
     invisibleTrains: string[] = [];
@@ -172,6 +183,14 @@ export class RailNetwork {
             }
         }
 
+        this.scheduledTrains = loadScheduledTrains(this);
+
+        if (this.config.scheduledTrains?.length) {
+            this.updateScheduledTimetables();       // refresh on startup if the distillate is stale
+            const days = this.config.scheduledTrains[0]!.source.fetchIntervalDays;
+            setInterval(() => { this.updateScheduledTimetables(); }, days * 24 * 3600 * 1000);
+        }
+
         if (this.config.processingOptions.cacheIntervalSeconds) {
             setInterval(() => { this.saveCache(); }, this.config.processingOptions.cacheIntervalSeconds * 1000);
         }
@@ -189,6 +208,43 @@ export class RailNetwork {
         // if (this.config.GTFSStaticAPI) {
         //     generateTimetable(this);
         // }
+    }
+
+    /**
+     * Every train the board should show right now: real vehicles plus scheduled ones.
+     */
+    get displayedTrains(): TrainInfo[] {
+        return [...this.trackedTrains, ...this.scheduledTrainInfos];
+    }
+
+    /**
+     * The scheduled trains only, at an arbitrary instant. Pure: no realtime, no retained state,
+     * so the same instant always gives the same answer. This is what ?time= serves.
+     */
+    simulateScheduledTrains(epochSeconds: number): TrainInfo[] {
+        return this.scheduledTrains.flatMap(train => train.simulate(epochSeconds));
+    }
+
+    /**
+     * Re-distils each configured scheduled timetable when the committed copy has aged out.
+     * A failure leaves the existing distillate in place — the board keeps running last week's
+     * timetable rather than losing the service.
+     */
+    async updateScheduledTimetables() {
+        for (const scheduled of this.config.scheduledTrains ?? []) {
+            try {
+                const file = path.resolve(this.configFolderPath, scheduled.timetableFile);
+                if (fs.existsSync(file)) {
+                    const ageMs = Date.now() - fs.statSync(file).mtimeMs;
+                    if (ageMs < scheduled.source.fetchIntervalDays * 24 * 3600 * 1000) continue;
+                }
+                await distilTimetable(this, scheduled, this.config.GTFSRealtimeAPI.key);
+                this.scheduledTrains = loadScheduledTrains(this);
+            } catch (error) {
+                log(this.id, `Could not refresh ${scheduled.id} timetable: ${(error as Error).message} ` +
+                    `(keeping the existing one)`);
+            }
+        }
     }
 
     /**
@@ -401,7 +457,13 @@ export class RailNetwork {
             this.invisibleTrains = [];
         }
 
-        this.trackedTrains = updateTrackedTrains(this, this.trackedTrains, this.trainEntities, this.invisibleTrains);
+        this.trackedTrains = updateTrackedTrains(this, this.trackedTrains, this.trainEntities);
+
+        // Scheduled trains are placed after real ones, so their conflict rules see current
+        // positions, and before contention is resolved, so both kinds contend together.
+        const now = Math.ceil(Date.now() / 1000);
+        this.scheduledTrainInfos = this.scheduledTrains.flatMap(train => train.update(now, this.trackedTrains));
+        applyAltBlocks(this, [...this.trackedTrains, ...this.scheduledTrainInfos], this.invisibleTrains);
         // console.timeEnd(`[${this.id}] Fetched GTFS data...`);
     }
 
@@ -416,7 +478,7 @@ export class RailNetwork {
         for (let index = 0; index < this.ledRailsAPIs.length; index++) {
             const api = this.ledRailsAPIs[index];
             if (api) {
-                this.ledRailsAPIs[index] = generateLedMap(api, this.trackedTrains, this.invisibleTrains, this.trackBlocks, this.worstUpdateTimeMS);
+                this.ledRailsAPIs[index] = generateLedMap(api, [...this.trackedTrains, ...this.scheduledTrainInfos], this.invisibleTrains, this.trackBlocks, this.worstUpdateTimeMS);
             }
         }
     }

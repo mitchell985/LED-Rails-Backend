@@ -103,12 +103,53 @@
             text-align: center;
             font-variant-numeric: tabular-nums;
         }
+
+        /* Simulated-time transport bar */
+        #time-bar {
+            position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+            display: none; gap: 14px; align-items: center;
+            padding: 10px 16px; background: #15161a; border-top: 2px solid #2a2c33;
+            color: #e8e6e1; font-family: inherit; font-size: 14px;
+        }
+        #time-bar.shown { display: flex; }
+        #time-bar.simulating { background: #1d1a10; border-top-color: #f2b705; }
+        #time-bar input[type=range] { flex: 1; accent-color: #f2b705; min-width: 120px; }
+        #time-bar input[type=date] {
+            background: #0e0f12; border: 1px solid #33353d; color: #e8e6e1;
+            border-radius: 6px; padding: 5px 8px; font: inherit;
+        }
+        #time-clock { font: 600 20px ui-monospace, Menlo, monospace; min-width: 96px; font-variant-numeric: tabular-nums; }
+        #time-bar button {
+            background: #23252b; border: 1px solid #3a3d45; color: #cfcdc7;
+            border-radius: 99px; padding: 5px 11px; cursor: pointer; font: inherit;
+        }
+        #time-bar button:hover { border-color: #5a5d67; }
+        #time-bar button.on { background: #f2b705; border-color: #f2b705; color: #241b00; font-weight: 700; }
+        #time-pill {
+            margin-left: auto; padding: 6px 14px; border-radius: 99px;
+            font-weight: 700; letter-spacing: .06em; font-size: 12px; cursor: pointer; border: none;
+        }
+        #time-pill.live { background: #1d7a3e; color: #fff; }
+        #time-pill.sim { background: #f2b705; color: #241b00; }
+        body.simulating .pcb-container { padding-bottom: 60px; }
     </style>
 </head>
 
 <body>
     <div class="pcb-container">
         <div id="svg-container"></div>
+    </div>
+
+
+    <div id="time-bar">
+        <input type="date" id="time-date">
+        <span id="time-clock">--:--:--</span>
+        <button id="time-play" title="Play / pause">&#9654;</button>
+        <input type="range" id="time-slider" min="14400" max="86399" step="20" value="36000">
+        <button class="speed" data-speed="1">1&times;</button>
+        <button class="speed" data-speed="10">10&times;</button>
+        <button class="speed" data-speed="60">60&times;</button>
+        <button id="time-pill" class="live">LIVE</button>
     </div>
 
     <div id="history-controls">
@@ -128,6 +169,18 @@
             DATA_ENDPOINT = window.location.pathname.replace(/\/api\/viewer/, '/110.json');
         }
         const DEBUG = true ? window.location.hostname === 'localhost' : false;
+
+        /**
+         * Simulated time.
+         *
+         * The board can be asked for any instant with ?time=<epoch seconds>. Such a response has
+         * its timestamp set to that instant and carries simulated: true, so every place that
+         * compares an update against "now" has to use the simulated clock instead of the wall
+         * clock — otherwise transitions are judged against the wrong time and the wrong LED lights.
+         */
+        const SIM = { on: false, epoch: 0, speed: 1, playing: false, day: new Date() };
+        const nowSeconds = () => SIM.on ? SIM.epoch : Date.now() / 1000;
+        const nowMillis = () => nowSeconds() * 1000;
 
         class ComponentPositionParser {
             constructor() {
@@ -439,7 +492,7 @@
         function updateLEDsFromAPI(apiData) {
             if (!apiData) return;
 
-            const nowEpochSeconds = Date.now() / 1000;
+            const nowEpochSeconds = nowSeconds();
             const newActiveLeds = new Map();
 
             // Apply specific updates
@@ -500,7 +553,7 @@
             let delay = 15000; // Default to 15 seconds (in case no update info)
             if (apiData.update) {
                 const nextFetchTime = (apiData.timestamp + apiData.update) * 1000;
-                delay = Math.max(0, (nextFetchTime - Date.now()) + ((1+Math.random()) * 1000)); // Add 1000-1999 ms random jitter
+                delay = Math.max(0, (nextFetchTime - nowMillis()) + ((1+Math.random()) * 1000)); // Add 1000-1999 ms random jitter
             }
 
             if (delay < 6000) delay = 6000; // Minimum 6 seconds between fetches (to avoid hammering)
@@ -511,10 +564,11 @@
         // Function to fetch and process LED updates from API
         async function fetchAndUpdateLEDs() {
             try {
-                const response = await fetch(DATA_ENDPOINT);
+                const url = SIM.on ? `${DATA_ENDPOINT}?time=${Math.floor(SIM.epoch)}` : DATA_ENDPOINT;
+                const response = await fetch(url);
                 const apiData = await response.json();
 
-                console.log(`Fetch Delay = ${Date.now() - (apiData.timestamp * 1000)} ms`);
+                console.log(`Fetch Delay = ${nowMillis() - (apiData.timestamp * 1000)} ms`);
 
                 // Update LEDs immediately
                 updateLEDsFromAPI(apiData);
@@ -522,8 +576,9 @@
                 // Add to history
                 addToHistory(currentLedState);
 
-                // Schedule future updates
-                scheduleUpdates(apiData);
+                // Schedule future updates. In simulated mode the playback loop drives the cadence
+                // instead: the payload's `update` interval is meaningless at 60x.
+                if (!SIM.on) scheduleUpdates(apiData);
 
                 // Store current data
                 currentAPIData = apiData;
@@ -535,6 +590,93 @@
                 nextFetchTimeout = setTimeout(fetchAndUpdateLEDs, 15000);
             }
         }
+
+
+        // ── Simulated-time transport bar ───────────────────────────────────────
+        // Shown only where a scheduled service exists to look at; the board is otherwise live.
+        (function setupTimeBar() {
+            const bar = document.getElementById('time-bar');
+            const dateInput = document.getElementById('time-date');
+            const clock = document.getElementById('time-clock');
+            const slider = document.getElementById('time-slider');
+            const playButton = document.getElementById('time-play');
+            const pill = document.getElementById('time-pill');
+            const history = document.getElementById('history-controls');
+
+            const pad = n => String(Math.floor(n)).padStart(2, '0');
+            const clockText = s => `${pad(s / 3600 % 24)}:${pad(s % 3600 / 60)}:${pad(s % 60)}`;
+
+            const dayStart = () => { const d = new Date(SIM.day); d.setHours(0, 0, 0, 0); return d.getTime() / 1000; };
+            const secondsOfDay = () => SIM.epoch - dayStart();
+
+            function render() {
+                bar.classList.toggle('simulating', SIM.on);
+                document.body.classList.toggle('simulating', SIM.on);
+                pill.className = SIM.on ? 'sim' : 'live';
+                pill.textContent = SIM.on ? 'SIMULATED' : 'LIVE';
+                playButton.innerHTML = SIM.playing ? '&#10074;&#10074;' : '&#9654;';
+                clock.textContent = SIM.on ? clockText(secondsOfDay()) : 'live';
+                if (history) history.style.display = SIM.on ? 'none' : '';
+                for (const button of bar.querySelectorAll('.speed')) {
+                    button.classList.toggle('on', Number(button.dataset.speed) === SIM.speed);
+                }
+                if (document.activeElement !== slider) slider.value = Math.floor(secondsOfDay());
+            }
+
+            function goTo(seconds) {
+                SIM.on = true;
+                SIM.epoch = dayStart() + Math.max(0, Math.min(86399, seconds));
+                render();
+                fetchAndUpdateLEDs();
+            }
+
+            function goLive() {
+                SIM.on = false;
+                SIM.playing = false;
+                render();
+                fetchAndUpdateLEDs();
+            }
+
+            let frame = null, lastFrame = 0;
+            function tick(timestamp) {
+                if (!SIM.playing) return;
+                if (lastFrame) {
+                    SIM.epoch += (timestamp - lastFrame) / 1000 * SIM.speed;
+                    if (secondsOfDay() >= 86399) { SIM.playing = false; }
+                }
+                lastFrame = timestamp;
+                render();
+                fetchAndUpdateLEDs();
+                frame = requestAnimationFrame(tick);
+            }
+
+            function setPlaying(playing) {
+                SIM.playing = playing;
+                lastFrame = 0;
+                if (playing) { SIM.on = true; frame = requestAnimationFrame(tick); }
+                else if (frame) { cancelAnimationFrame(frame); }
+                render();
+            }
+
+            const today = new Date();
+            dateInput.value = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
+            SIM.epoch = dayStart() + 10 * 3600;
+
+            dateInput.onchange = () => { SIM.day = new Date(`${dateInput.value}T00:00:00`); goTo(Number(slider.value)); };
+            slider.oninput = () => goTo(Number(slider.value));
+            playButton.onclick = () => setPlaying(!SIM.playing);
+            pill.onclick = () => SIM.on ? goLive() : goTo(Number(slider.value));
+            for (const button of bar.querySelectorAll('.speed')) {
+                button.onclick = () => { SIM.speed = Number(button.dataset.speed); render(); };
+            }
+
+            // Only offer the control on boards that actually have something scheduled to show.
+            const statusUrl = window.location.pathname.replace(/\/api\/viewer/, '/status');
+            fetch(statusUrl)
+                .then(response => response.json())
+                .then(status => { if (status.scheduledServices > 0) { bar.classList.add('shown'); render(); } })
+                .catch(() => { /* leave the bar hidden */ });
+        })();
 
         // Usage example:
         const positionParser = new ComponentPositionParser();

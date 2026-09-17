@@ -25,6 +25,7 @@ interface LEDRailsAPIOutput {
     update: number;                     // Offset time from timestamp for next update
     colors: Record<number, number[]>;   // Map color Id to [R,G,B] (0-255)
     updates: LEDUpdate[];               // Map block number to LEDUpdate
+    simulated?: boolean;                // Set only on ?time= responses, so nothing mistakes one for live
 }
 
 interface LEDUpdate {
@@ -41,7 +42,7 @@ interface Platform {
     routes: string[] | undefined;       // Allowed routes for this block, parsed from [ROUTE1,ROUTE2]
 }
 
-interface TrackBlock {
+export interface TrackBlock {
     blockNumber: number;                // Track block number (ref from pcb) (e.g., D302 is 302)
     platforms: Platform[] | undefined;  // Array of platforms associated with this block
     altBlock: number | undefined;       // Alternative block number (can be used if multiple trains are same block)
@@ -62,6 +63,8 @@ export interface TrainInfo {
     previousBlock: number | undefined; // Previous block number (e.g., 300)
     currentBlockDisplayThreshold: number | undefined; // Display threshold of the current block (can be inherited from platform or parent block)
     route: string; // Route ID from GTFS e.g. "EAST-201"
+    directionId?: number | undefined; // GTFS direction_id, used to tell which way a train is travelling
+    scheduled?: boolean; // True for synthetic trains placed from a static timetable (see scheduledTrains.ts)
     tripId: string | undefined; // Trip ID from GTFS
     stops: { stopId: string; departureTime: number }[] | undefined;     // Array of upcoming stop IDs and departure times for this train
 }
@@ -349,7 +352,7 @@ export function loadTrackBlocks(railNetwork: RailNetwork): void {
  * @param polygon Array of [lat, lng] tuples defining the polygon vertices
  * @returns True if the point is inside the polygon, false otherwise
  */
-function isPointInPolygon(pointLat: number, pointLng: number, polygon: Array<[number, number]>): boolean {
+export function isPointInPolygon(pointLat: number, pointLng: number, polygon: Array<[number, number]>): boolean {
     if (!polygon || polygon.length < 3) {
         // A polygon needs at least 3 vertices
         return false;
@@ -471,7 +474,6 @@ export function updateTrackedTrains(
     railNetwork: RailNetwork,
     trackedTrains: TrainInfo[],
     gtfsTrains: Entity[],
-    invisibleTrainIds: string[],
 ): TrainInfo[] {
 
     // Synchronize GTFS train data with our tracked trains
@@ -479,7 +481,7 @@ export function updateTrackedTrains(
 
     // Update track block assignments for all trains with valid positions
     if (railNetwork.trackBlocks) {
-        assignBlocksToTrains(railNetwork, trackedTrains, invisibleTrainIds);
+        assignBlocksToTrains(railNetwork, trackedTrains);
     }
 
     return trackedTrains;
@@ -588,6 +590,7 @@ function updateExistingTrainPosition(trackedTrain: TrainInfo, gtfsTrain: Entity)
         trackedTrain.position.timestamp = gtfsTrain.vehicle?.timestamp ?? 0;
 
         trackedTrain.route = String(gtfsTrain.vehicle?.trip?.route_id ?? gtfsTrain.vehicle?.trip?.routeId ?? 'OUT-OF-SERVICE');
+        trackedTrain.directionId = gtfsTrain.vehicle?.trip?.direction_id;
         trackedTrain.tripId = gtfsTrain.vehicle?.trip?.trip_id;
         trackedTrain.stops = addNewStopsFromTripUpdate(trackedTrain.stops ?? [], gtfsTrain.tripUpdate?.stopTimeUpdate);
     }
@@ -613,6 +616,7 @@ function addNewTrain(trackedTrains: TrainInfo[], gtfsTrain: Entity): void {
             bearing: position?.bearing, // Can be undefined
         },
         route: String(vehicle?.trip?.route_id ?? vehicle?.trip?.routeId ?? 'OUT-OF-SERVICE'),
+        directionId: vehicle?.trip?.direction_id,
         currentBlock: undefined,
         previousBlock: undefined,
         currentParentBlock: undefined,
@@ -630,7 +634,7 @@ function addNewTrain(trackedTrains: TrainInfo[], gtfsTrain: Entity): void {
  * @param displayThreshold Time in seconds to display trains after their last update
  * @param invisibleTrainIds List of train IDs that should be hidden
  */
-function assignBlocksToTrains(railNetwork: RailNetwork, trackedTrains: TrainInfo[], invisibleTrainIds: string[]): void {
+function assignBlocksToTrains(railNetwork: RailNetwork, trackedTrains: TrainInfo[]): void {
     const trackBlocks = railNetwork.trackBlocks;
     if (!trackBlocks) return;
 
@@ -639,6 +643,9 @@ function assignBlocksToTrains(railNetwork: RailNetwork, trackedTrains: TrainInfo
     const now = Math.ceil(Date.now() / 1000);
 
     trackedTrains.forEach(train => {
+        // Scheduled trains resolve their block against their own chain, never the whole board.
+        if (train.scheduled) return;
+
         // Skip really old positions
         if (train.position.timestamp < now - maxDisplayThreshold) {
             train.currentBlock = undefined;
@@ -691,7 +698,20 @@ function assignBlocksToTrains(railNetwork: RailNetwork, trackedTrains: TrainInfo
         // }
     });
 
-    updateAltBlocks(trackBlocks, trackedTrains, invisibleTrainIds, railNetwork.id);
+}
+
+/**
+ * Resolves contention when several trains occupy one block.
+ *
+ * Called after scheduled trains have been placed, so that real and scheduled trains contend
+ * together. Separate from assignBlocksToTrains() for that reason.
+ *
+ * @param railNetwork Rail network configuration and state
+ * @param trains All trains to consider — real and scheduled
+ * @param invisibleTrainIds List of train IDs that should be hidden (appended to)
+ */
+export function applyAltBlocks(railNetwork: RailNetwork, trains: TrainInfo[], invisibleTrainIds: string[]): void {
+    if (railNetwork.trackBlocks) updateAltBlocks(railNetwork.trackBlocks, trains, invisibleTrainIds, railNetwork.id);
 }
 
 /**
@@ -856,12 +876,12 @@ function updateAltBlocks(trackBlocks: TrackBlockMap, trackedTrains: TrainInfo[],
             .filter(train => !invisibleTrainIds.includes(train.trainId))
         // .filter(train => train.position.timestamp > Math.ceil(Date.now() / 1000) - 300); // Only consider trains with recent updates
         if (trainsInBlock.length > 1) {
-            // Sort trains by route and make sure "OUT-OF-SERVICE" is last
-            trainsInBlock.sort((a, b) => {
-                if (a.route === 'OUT-OF-SERVICE' && b.route !== 'OUT-OF-SERVICE') return 1;
-                if (a.route !== 'OUT-OF-SERVICE' && b.route === 'OUT-OF-SERVICE') return -1;
-                return a.route.localeCompare(b.route);
-            });
+            // Explicit priority, so that a route's name can never silently decide who is displayed:
+            //   1. real and in service   2. scheduled (from a timetable)   3. out of service
+            // Tiers 1 and 3 reproduce the previous ordering exactly, so networks without a
+            // scheduled service are unaffected.
+            const tier = (train: TrainInfo) => train.route === 'OUT-OF-SERVICE' ? 2 : train.scheduled ? 1 : 0;
+            trainsInBlock.sort((a, b) => tier(a) - tier(b) || a.route.localeCompare(b.route));
 
             for (let i = 0; i < trainsInBlock.length; i++) {
                 const train = trainsInBlock[i];
@@ -895,12 +915,13 @@ function updateAltBlocks(trackBlocks: TrackBlockMap, trackedTrains: TrainInfo[],
  * @param invisibleTrainIds List of train IDs that should be hidden
  * @returns The mutated LEDRailsAPI object with updated LED statuses
  */
-export function generateLedMap(api: LEDRailsAPI, trackedTrains: TrainInfo[], invisibleTrainIds: string[], trackBlocks?: TrackBlockMap, worstUpdateTimeMS?: number): LEDRailsAPI {
+export function generateLedMap(api: LEDRailsAPI, trackedTrains: TrainInfo[], invisibleTrainIds: string[], trackBlocks?: TrackBlockMap, worstUpdateTimeMS?: number, nowSeconds?: number): LEDRailsAPI {
     // Reset updates for this output
     api.output.updates = [];
 
-    // Calculate time thresholds for display and update
-    const now = Math.ceil(Date.now() / 1000);
+    // Calculate time thresholds for display and update.
+    // nowSeconds lets a simulated request render the board at an instant other than the present.
+    const now = nowSeconds ?? Math.ceil(Date.now() / 1000);
     const updateTime = now - api.updateInterval;
 
     // Iterate over trains that should be displayed

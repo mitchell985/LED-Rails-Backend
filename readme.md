@@ -11,6 +11,8 @@ This project is built for the Live Train Maps that I sell through my store: [kea
 * **LED Map Generation:** Computes and serves LED board updates based on train positions and track block occupancy.
 * **Train Pair Detection:** Identifies and pairs trains running in close proximity (Used for AKL 6-car trains).
 * **Train Blocks:** The `trackBlocks.kml` file can be edited with Google Earth for custom block layouts.
+* **Scheduled Trains:** Services with no realtime feed can be placed from static GTFS timetable data alone, interpolated between their scheduled station times (used for Te Huia on the Auckland board).
+* **Simulated Time:** Any board endpoint accepts `?time=<epoch seconds>` to render scheduled services at an arbitrary instant, and `/api/viewer` gains a transport bar to scrub through a service day.
 * **API Endpoints:** RESTful endpoints for vehicle, train, and LED map data.
 * **Compression:** Built-in zstd / brotli / gzip / deflate compression.
 * **Docker Support:** Ready-to-run with Docker Compose for easy deployment.
@@ -21,6 +23,7 @@ This project is built for the Live Train Maps that I sell through my store: [kea
 * `railNetwork.ts` - City-specific configuration loader and documentation for `config.json` structure.
 * `trackBlocks.ts` - KML parsing, block occupancy, and LED map update logic.
 * `trainPairs.ts` - Train pair detection and caching.
+* `scheduledTrains.ts` - Timetable distillation and position modelling for services with no realtime feed.
 * `cache.ts` - Caching to and from gzipped JSON files.
 * `customUtils.ts` - Utility functions, including timestamped & colorized logging.
 * `map.html` - Leaflet-based web map for visualizing live train positions and track blocks.
@@ -47,6 +50,24 @@ Replace `<city>` with a lowercase city code (e.g. `akl`, `wlg`, `mel`) and `<ver
 | `/<city>-ltm/<version>.json`      | LED map update for the city board |
 | `/<city>-ltm/api/viewer`          | Preview for the PCB               |
 | `/<city>-ltm/api/map`             | Map of the raw GTFS positions     |
+
+### Simulated time
+
+`/<city>-ltm/<version>.json` and `/<city>-ltm/api/trackedtrains` accept `?time=<epoch seconds>`, returning the board as it would be at that instant. Only **scheduled** trains appear — realtime vehicles cannot be rewound, and leaving them out is what makes a given instant reproducible. Such a response carries `"simulated": true` and is served `Cache-Control: no-store`.
+
+```
+curl "http://localhost:3000/akl-ltm/110.json?time=1789682400"
+```
+
+### Scheduled trains
+
+A network may declare services that have no realtime feed under `scheduledTrains` in `config.json`. Their timetable is distilled from GTFS into a small committed file beside `config.json`, refreshed automatically every `fetchIntervalDays`, or on demand:
+
+```
+bun scheduledTrains.ts AKL
+```
+
+Dates on which a service does not run — public holidays and planned closures — live in the network's `noServiceFile`, and override the feed's own calendar.
 
 ## Configuration
 

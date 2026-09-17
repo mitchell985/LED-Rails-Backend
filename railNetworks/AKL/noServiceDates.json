@@ -1,0 +1,146 @@
+{
+  "_source": "Employment New Zealand, public holidays and anniversary dates (https://www.employment.govt.nz/leave-and-holidays/public-holidays/public-holidays-and-anniversary-dates), read 2026-09-18. Scope: national public holidays plus Auckland Anniversary, both actual and observed days, plus planned track closures published by Waikato Regional Council. Overrides the GTFS feed's own calendar_dates.",
+  "validThrough": "2027-12-31",
+  "dates": [
+    {
+      "date": "2026-01-01",
+      "reason": "New Year's Day"
+    },
+    {
+      "date": "2026-01-02",
+      "reason": "Day after New Year's Day"
+    },
+    {
+      "date": "2026-01-26",
+      "reason": "Auckland Anniversary (observed)"
+    },
+    {
+      "date": "2026-01-29",
+      "reason": "Auckland Anniversary (actual)"
+    },
+    {
+      "date": "2026-02-06",
+      "reason": "Waitangi Day"
+    },
+    {
+      "date": "2026-04-03",
+      "reason": "Good Friday"
+    },
+    {
+      "date": "2026-04-06",
+      "reason": "Easter Monday"
+    },
+    {
+      "date": "2026-04-25",
+      "reason": "Anzac Day (actual)"
+    },
+    {
+      "date": "2026-04-27",
+      "reason": "Anzac Day (observed)"
+    },
+    {
+      "date": "2026-06-01",
+      "reason": "King's Birthday"
+    },
+    {
+      "date": "2026-07-10",
+      "reason": "Matariki"
+    },
+    {
+      "date": "2026-07-11",
+      "reason": "Track maintenance \u2014 Matariki weekend closure (WRC)"
+    },
+    {
+      "date": "2026-07-12",
+      "reason": "Track maintenance \u2014 Matariki weekend closure (WRC)"
+    },
+    {
+      "date": "2026-10-26",
+      "reason": "Labour Day"
+    },
+    {
+      "date": "2026-12-25",
+      "reason": "Christmas Day"
+    },
+    {
+      "date": "2026-12-26",
+      "reason": "Boxing Day (actual)"
+    },
+    {
+      "date": "2026-12-28",
+      "reason": "Boxing Day (observed)"
+    },
+    {
+      "date": "2027-01-01",
+      "reason": "New Year's Day"
+    },
+    {
+      "date": "2027-01-02",
+      "reason": "Day after New Year's Day (actual)"
+    },
+    {
+      "date": "2027-01-04",
+      "reason": "Day after New Year's Day (observed)"
+    },
+    {
+      "date": "2027-01-29",
+      "reason": "Auckland Anniversary (actual)"
+    },
+    {
+      "date": "2027-02-01",
+      "reason": "Auckland Anniversary (observed)"
+    },
+    {
+      "date": "2027-02-06",
+      "reason": "Waitangi Day (actual)"
+    },
+    {
+      "date": "2027-02-08",
+      "reason": "Waitangi Day (observed)"
+    },
+    {
+      "date": "2027-03-26",
+      "reason": "Good Friday"
+    },
+    {
+      "date": "2027-03-29",
+      "reason": "Easter Monday"
+    },
+    {
+      "date": "2027-04-25",
+      "reason": "Anzac Day (actual)"
+    },
+    {
+      "date": "2027-04-26",
+      "reason": "Anzac Day (observed)"
+    },
+    {
+      "date": "2027-06-07",
+      "reason": "King's Birthday"
+    },
+    {
+      "date": "2027-06-25",
+      "reason": "Matariki"
+    },
+    {
+      "date": "2027-10-25",
+      "reason": "Labour Day"
+    },
+    {
+      "date": "2027-12-25",
+      "reason": "Christmas Day (actual)"
+    },
+    {
+      "date": "2027-12-26",
+      "reason": "Boxing Day (actual)"
+    },
+    {
+      "date": "2027-12-27",
+      "reason": "Christmas Day (observed)"
+    },
+    {
+      "date": "2027-12-28",
+      "reason": "Boxing Day (observed)"
+    }
+  ]
+}

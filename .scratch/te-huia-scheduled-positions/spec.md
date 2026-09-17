@@ -275,3 +275,45 @@ Realtime integration for Te Huia · schedule-derived ghosts for AT trains genera
 **Prototypes** (throwaway, not merged): [movement model](prototypes/te-huia-movement-PROTOTYPE.html) · [viewer time control](prototypes/viewer-time-PROTOTYPE.html)
 
 **Decisions:** [the map](map.md) and its 17 [tickets](issues/), each carrying the reasoning and what was rejected.
+
+---
+
+## 9. Implementation notes (built 2026-09-18)
+
+Implemented in `scheduledTrains.ts` (new), with edits to `railNetwork.ts`, `trackBlocks.ts`, `server.ts`, `viewer.html`, and AKL's `config.json`, `trackBlocks.kml` plus two new committed data files. Zero new TypeScript errors: the project reports the same 40 pre-existing strict-mode errors before and after.
+
+### Deviations from this spec, and why
+
+1. **`stop_times.txt` is never read.** §2.2 asked the distiller to stream the 127 MB file; it turned out v3 already supplies Te Huia's 72 stop times, so the zip is read only for `calendar`, `calendar_dates`, `trips`, `shapes`, `routes` and `stops`. Strictly better than the constraint it replaces.
+2. **Shape → chain mapping is precomputed at load, not at ingest** (§2.6). The distilled file stays independent of the KML, and the cost is paid once at startup rather than per tick, which is what the constraint was protecting.
+3. **`?time=` is not honoured on `/api/map`** (§3.1). `map.html` plots raw GTFS vehicle *entities*, and a scheduled train has no entity — only a `TrainInfo`. `/api/trackedtrains?time=` covers the debugging case; wiring `map.html` would mean teaching it a second data source.
+4. **`/status` gained `scheduledServices` and `scheduledTrains`**, so the viewer only shows the transport bar on a board that has a scheduled service to look at.
+5. **The distilled file is 193 KB**, against the 190 KB estimated.
+
+### One defect found and fixed while building
+
+The first cut used a single "which chain block is this?" helper that always fell back to the nearest block. That is right for *display* (§2.6, never go dark) but wrong for deciding whether a train is **on the board at all**: every Hamilton stop resolved to Pukekohe, so `boardStart` became the trip's origin and Te Huia sat lit at Pukekohe for the entire 80 km run up from Frankton. Containment and nearest-block are now separate operations — `chainIndexAt()` returns undefined off the board, `nearestChainIndex()` never does.
+
+### Verified against §5
+
+All seven acceptance checks pass, plus the conflict rules exercised directly:
+
+| check | result |
+| --- | --- |
+| southbound run `300 → 207`, monotonic, no off-chain block | pass — 54 distinct blocks at 20 s sampling |
+| northbound terminates at **300**, not 321 | pass |
+| every chain block reachable | pass — at 2 s sampling all 62 appear; `327 Ōrākei` is occupied for ~10 s, which a 20 s poll cannot see (equally true of real trains) |
+| held behind a stopped same-direction train | pass — stops at **328**, leaving 329 clear, and never passes it |
+| opposite-direction train in the same block | pass — ignored, Te Huia runs through |
+| out-of-service unit in `172 Wiri Depot Platform` | pass — ignored, Te Huia passes |
+| Christmas Day and Boxing Day (observed) | pass — nothing lights, though the feed schedules a service |
+| malformed / negative `?time=` | pass — `400` |
+| instant outside the calendar | pass — `200`, empty `updates` |
+| same instant twice | pass — identical payloads |
+| live payload | pass — no `simulated` key, shape unchanged |
+
+### Still outstanding
+
+- **The yellow is unconfirmed.** `[255, 199, 0]` is live on the board now and can be judged in `/akl-ltm/api/viewer`.
+- **`noServiceDates.json` covers 2026–2027 only**, transcribed from Employment New Zealand (fetched 2026-09-18). It expires 2027-12-31, after which the board fails open and warns. Whether Waikato observes a separate anniversary day is still unverified.
+- The risks in §6 are unchanged: an indefinitely-held ghost never leaves the board; the WRC/feed 15-minute divergence is undetectable; Te Huia flickers when an opposite-direction train shares its block.

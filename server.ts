@@ -5,6 +5,7 @@ import path from 'path';
 
 import { LOG_LABELS, log } from './customUtils';
 import { RailNetwork } from './railNetwork';
+import { LEDRailsAPI, applyAltBlocks, generateLedMap } from './trackBlocks';
 
 const PORT = 3000;
 const NETWORK_UPDATE_STAGGER_MS = 1500;
@@ -14,6 +15,50 @@ loadEnv({ quiet: true }); // Load environment variables from .env file
 
 // --- Type Definitions ---
 type RouteHandler = (req: Request) => Response | Promise<Response>;
+
+/**
+ * Reads ?time=<epoch seconds> from a request.
+ *
+ * Returns undefined for a live request, 'invalid' for a value we cannot use, or the instant.
+ * Failing loudly matters: silently falling back to live would make a broken test look like a
+ * working one.
+ */
+function simulatedTime(req: Request): number | undefined | 'invalid' {
+    let raw: string | null = null;
+    try {
+        raw = new URL(req.url, 'http://localhost').searchParams.get('time');
+    } catch { return 'invalid'; }
+
+    if (raw === null) return undefined;
+
+    const seconds = Number(raw);
+    if (!Number.isFinite(seconds) || !Number.isInteger(seconds) || seconds <= 0) return 'invalid';
+    return seconds;
+}
+
+const badTime = () => Response.json(
+    { error: 'invalid ?time=', detail: 'expected whole epoch seconds, e.g. ?time=1789700000' },
+    { status: 400, headers: { 'Cache-Control': 'no-store' } });
+
+/**
+ * The board as it would be at an arbitrary instant, containing SCHEDULE-DERIVED TRAINS ONLY —
+ * realtime vehicles cannot be rewound, and leaving them out is what makes a given instant
+ * reproducible.
+ *
+ * Builds its own copy of the API output: generateLedMap() mutates what it is given, and the live
+ * object is the one served to every real board on every poll.
+ */
+function simulatedBoard(network: RailNetwork, api: LEDRailsAPI, epochSeconds: number): Response {
+    const trains = network.simulateScheduledTrains(epochSeconds);
+    const invisible: string[] = [];
+    applyAltBlocks(network, trains, invisible);
+
+    const copy: LEDRailsAPI = { ...api, output: { ...api.output, updates: [] } };
+    generateLedMap(copy, trains, invisible, network.trackBlocks, 0, epochSeconds);
+    copy.output.simulated = true;
+
+    return Response.json(copy.output, { headers: { 'Cache-Control': 'no-store' } });
+}
 
 async function initializeServer() {
     const routes = new Map<string, RouteHandler>();
@@ -53,7 +98,12 @@ async function initializeServer() {
 
                 // Setup server endpoints for each board revision api
                 network.ledRailsAPIs.forEach(api => {
-                    addRoute('GET', api.url, () => Response.json(api.output));
+                    addRoute('GET', api.url, (req) => {
+                        const time = simulatedTime(req);
+                        if (time === 'invalid') return badTime();
+                        if (time === undefined) return Response.json(api.output);
+                        return simulatedBoard(network, api, time);
+                    });
                 });
 
                 const prefix = `/${network.id.toLowerCase()}-ltm`;
@@ -69,6 +119,8 @@ async function initializeServer() {
                         trackBlocks: network.trackBlocks?.size ?? 0,
                         entities: network.entities.length,
                         trackedTrains: network.trackedTrains.length,
+                        scheduledTrains: network.scheduledTrainInfos.length,
+                        scheduledServices: network.scheduledTrains.length,
                     });
                 });
 
@@ -78,7 +130,12 @@ async function initializeServer() {
                 // Raw data endpoint for trains only
                 addRoute('GET', `${prefix}/api/vehicles/trains`, () => Response.json(network.trainEntities));
 
-                addRoute('GET', `${prefix}/api/trackedtrains`, () => Response.json(network.trackedTrains));
+                addRoute('GET', `${prefix}/api/trackedtrains`, (req) => {
+                    const time = simulatedTime(req);
+                    if (time === 'invalid') return badTime();
+                    if (time === undefined) return Response.json(network.displayedTrains);
+                    return Response.json(network.simulateScheduledTrains(time), { headers: { 'Cache-Control': 'no-store' } });
+                });
 
                 // stopsMap (To make it easier to map stop IDs to names/platforms)
                 if (network.stopsMap) {
