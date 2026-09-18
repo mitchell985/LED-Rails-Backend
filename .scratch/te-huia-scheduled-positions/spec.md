@@ -314,6 +314,6 @@ All seven acceptance checks pass, plus the conflict rules exercised directly:
 
 ### Still outstanding
 
-- **The yellow is unconfirmed.** `[255, 199, 0]` is live on the board now and can be judged in `/akl-ltm/api/viewer`.
+- ~~The yellow is unconfirmed.~~ **Confirmed by the repo owner, 2026-09-18**: `[255, 199, 0]` / `#ffc700` stands as Te Huia's colour, judged on the real board against the AT route colours.
 - **`noServiceDates.json` covers 2026–2027 only**, transcribed from Employment New Zealand (fetched 2026-09-18). It expires 2027-12-31, after which the board fails open and warns. Whether Waikato observes a separate anniversary day is still unverified.
 - The risks in §6 are unchanged: an indefinitely-held ghost never leaves the board; the WRC/feed 15-minute divergence is undetectable; Te Huia flickers when an opposite-direction train shares its block.
